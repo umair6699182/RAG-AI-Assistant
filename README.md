@@ -133,7 +133,7 @@ create table document_chunks (
 );
 Installation
 1. Clone Repository
-git clone https://github.com/your-username/rag-app.git
+git clone https://github.com/umair6699182/RAG-AI-Assistant.git
 cd rag-app
 2. Frontend Setup
 cd frontend
