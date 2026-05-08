@@ -1,8 +1,10 @@
 # app/routes/chat.py
 
-from typing import List, Optional, Any
+import json
+from typing import List, Optional
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
@@ -38,7 +40,6 @@ def create_query_embedding(query: str) -> List[float]:
         model=EMBEDDING_MODEL,
         input=query,
     )
-
     return response.data[0].embedding
 
 
@@ -47,11 +48,6 @@ def search_similar_chunks(
     match_count: int = 5,
     file_id: Optional[str] = None,
 ) -> List[dict]:
-    """
-    This calls a Supabase RPC function named `match_chunks`.
-    You need to create this function in Supabase SQL editor.
-    """
-
     params = {
         "query_embedding": query_embedding,
         "match_count": match_count,
@@ -59,7 +55,6 @@ def search_similar_chunks(
     }
 
     response = supabase.rpc("match_chunks", params).execute()
-
     return response.data or []
 
 
@@ -68,15 +63,27 @@ def build_context(chunks: List[dict]) -> str:
 
     for index, chunk in enumerate(chunks, start=1):
         content = chunk.get("content", "")
-
-        context_parts.append(
-            f"Source {index}:\n{content}"
-        )
+        context_parts.append(f"Source {index}:\n{content}")
 
     return "\n\n".join(context_parts)
 
 
-def generate_answer(user_message: str, context: str) -> str:
+def build_sources(chunks: List[dict]) -> List[dict]:
+    sources = []
+
+    for chunk in chunks:
+        sources.append(
+            {
+                "content": chunk.get("content", ""),
+                "file_id": chunk.get("file_id"),
+                "metadata": chunk.get("metadata"),
+            }
+        )
+
+    return sources
+
+
+def get_chat_messages(user_message: str, context: str) -> List[dict]:
     system_prompt = """
 You are a helpful AI assistant.
 
@@ -89,16 +96,14 @@ Rules:
 - Keep the answer concise and helpful.
 """
 
-    response = openai_client.chat.completions.create(
-        model=CHAT_MODEL,
-        messages=[
-            {
-                "role": "system",
-                "content": system_prompt,
-            },
-            {
-                "role": "user",
-                "content": f"""
+    return [
+        {
+            "role": "system",
+            "content": system_prompt,
+        },
+        {
+            "role": "user",
+            "content": f"""
 Document context:
 
 {context}
@@ -106,21 +111,49 @@ Document context:
 User question:
 {user_message}
 """,
-            },
-        ],
+        },
+    ]
+
+
+def generate_answer(user_message: str, context: str) -> str:
+    response = openai_client.chat.completions.create(
+        model=CHAT_MODEL,
+        messages=get_chat_messages(user_message, context),
         temperature=0.2,
     )
 
     return response.choices[0].message.content or ""
 
 
+def stream_answer(user_message: str, context: str, sources: List[dict]):
+    try:
+        # Optional: send sources first
+        yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
+
+        stream = openai_client.chat.completions.create(
+            model=CHAT_MODEL,
+            messages=get_chat_messages(user_message, context),
+            temperature=0.2,
+            stream=True,
+        )
+
+        for chunk in stream:
+            token = chunk.choices[0].delta.content
+
+            if token:
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+        yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+    except Exception as e:
+        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_document(body: ChatRequest):
     try:
-        # 1. Create embedding for user's question
         query_embedding = create_query_embedding(body.message)
 
-        # 2. Find matching chunks from Supabase
         matched_chunks = search_similar_chunks(
             query_embedding=query_embedding,
             match_count=body.match_count,
@@ -133,26 +166,9 @@ async def chat_with_document(body: ChatRequest):
                 "sources": [],
             }
 
-        # 3. Build context from matched chunks
         context = build_context(matched_chunks)
-
-        # 4. Generate final answer from OpenAI
-        answer = generate_answer(
-            user_message=body.message,
-            context=context,
-        )
-
-        # 5. Return answer + sources
-        sources = []
-
-        for chunk in matched_chunks:
-            sources.append(
-                {
-                    "content": chunk.get("content", ""),
-                    "file_id": chunk.get("file_id"),
-                    "metadata": chunk.get("metadata"),
-                }
-            )
+        answer = generate_answer(body.message, context)
+        sources = build_sources(matched_chunks)
 
         return {
             "answer": answer,
@@ -163,4 +179,44 @@ async def chat_with_document(body: ChatRequest):
         raise HTTPException(
             status_code=500,
             detail=f"Failed to chat with document: {str(e)}",
+        )
+
+
+@router.post("/chat/stream")
+async def chat_with_document_stream(body: ChatRequest):
+    try:
+        query_embedding = create_query_embedding(body.message)
+
+        matched_chunks = search_similar_chunks(
+            query_embedding=query_embedding,
+            match_count=body.match_count,
+            file_id=body.file_id,
+        )
+
+        if not matched_chunks:
+            async def no_result_stream():
+                yield f"data: {json.dumps({'type': 'token', 'content': 'I could not find relevant information in the uploaded document.'})}\n\n"
+                yield f"data: {json.dumps({'type': 'done'})}\n\n"
+
+            return StreamingResponse(
+                no_result_stream(),
+                media_type="text/event-stream",
+            )
+
+        context = build_context(matched_chunks)
+        sources = build_sources(matched_chunks)
+
+        return StreamingResponse(
+            stream_answer(body.message, context, sources),
+            media_type="text/event-stream",
+            headers={
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+            },
+        )
+
+    except Exception as e:
+        raise HTTPException(
+            status_code=500,
+            detail=f"Failed to stream chat with document: {str(e)}",
         )
