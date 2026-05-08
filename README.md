@@ -21,6 +21,12 @@ FastAPI
 Python
 OpenAI SDK
 LangChain (Optional)
+<img width="1899" height="875" alt="Screenshot 2026-05-09 010011" src="https://github.com/user-attachments/assets/3e796187-bb62-4602-b3c3-caeeadfe396f" />
+<img width="1919" height="880" alt="Screenshot 2026-05-09 010035" src="https://github.com/user-attachments/assets/d809443f-e0e0-4294-a513-a48fc2688ee1" />
+<img width="1919" height="865" alt="Screenshot 2026-05-09 010406" src="https://github.com/user-attachments/assets/3b3ebb56-c152-40d5-9785-a058d2e48360" />
+
+
+
 PyPDF / PDFPlumber
 Database & Storage
 Supabase PostgreSQL
