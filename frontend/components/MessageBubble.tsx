@@ -66,7 +66,7 @@ export default function MessageBubble({
           </div>
         ) : (
           <div
-            className={`max-w-[72%] px-3.5 py-2.5 text-[12.5px] leading-[1.6] whitespace-pre-wrap break-words ${
+            className={`max-w-[72%] px-3.5 py-2.5 text-[12.5px] leading-[1.6] whitespace-pre-wrap wrap-break-word ${
               isUser
                 ? "bg-[#7c6af7] text-white rounded-2xl rounded-tr-[4px]"
                 : "bg-[#1c1c28] text-white border border-white/[0.07] rounded-2xl rounded-tl-[4px]"

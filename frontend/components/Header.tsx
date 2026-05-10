@@ -106,7 +106,7 @@ export default function Header({
         </div>
       </div>
 
-      <nav className="flex min-w-0 items-center gap-1 rounded-xl border border-white/[0.07] bg-white/[0.03] p-1">
+      <nav className="flex min-w-0 items-center gap-1 rounded-xl border border-white/[0.07] bg-white/3 p-1">
         {NAV_ITEMS.map((item) => (
           <button
             key={item.value}
@@ -114,7 +114,7 @@ export default function Header({
             className={`flex h-8 items-center gap-1.5 rounded-lg px-3 text-[12px] font-medium transition-all duration-150 ${
               activeView === item.value
                 ? "bg-white/10 text-white shadow-[0_8px_24px_rgba(0,0,0,0.18)]"
-                : "text-[#8b8b9a] hover:bg-white/[0.05] hover:text-white"
+                : "text-[#8b8b9a] hover:bg-white/5 hover:text-white"
             }`}
           >
             <svg
@@ -137,7 +137,7 @@ export default function Header({
       <div ref={menuRef} className="relative flex items-center gap-2.5">
         <button
           onClick={() => setMenuOpen((open) => !open)}
-          className="flex w-11 items-center justify-center gap-2 rounded-xl border border-white/[0.08] bg-white/[0.04] px-1.5 py-1.5 text-left transition hover:bg-white/[0.07] sm:w-[190px] sm:justify-start sm:px-2"
+          className="flex w-11 items-center justify-center gap-2 rounded-xl border border-white/8 bg-white/4 px-1.5 py-1.5 text-left transition hover:bg-white/[0.07] sm:w-[190px] sm:justify-start sm:px-2"
         >
           <Avatar
             avatarUrl={avatarUrl}
@@ -167,7 +167,7 @@ export default function Header({
         </button>
 
         {menuOpen && (
-          <div className="absolute right-0 top-[46px] z-50 w-[270px] rounded-xl border border-white/[0.08] bg-[#12121a] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
+          <div className="absolute right-0 top-[46px] z-50 w-[270px] rounded-xl border border-white/8 bg-[#12121a] p-3 shadow-[0_18px_60px_rgba(0,0,0,0.45)]">
             <div className="mb-3 flex items-center gap-2.5 border-b border-white/[0.07] pb-3">
               <Avatar
                 avatarUrl={avatarUrl}
@@ -186,7 +186,7 @@ export default function Header({
             </div>
 
             <div className="mb-3 grid grid-cols-2 gap-2">
-              <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2">
+              <div className="rounded-lg border border-white/[0.07] bg-white/3 px-2.5 py-2">
                 <p className="text-[10px] uppercase text-[#5a5a6e]">
                   Provider
                 </p>
@@ -195,7 +195,7 @@ export default function Header({
                 </p>
               </div>
 
-              <div className="rounded-lg border border-white/[0.07] bg-white/[0.03] px-2.5 py-2">
+              <div className="rounded-lg border border-white/[0.07] bg-white/3 px-2.5 py-2">
                 <p className="text-[10px] uppercase text-[#5a5a6e]">
                   Library
                 </p>
@@ -210,7 +210,7 @@ export default function Header({
                 setMenuOpen(false);
                 onViewChange("settings");
               }}
-              className="mb-2 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-[#d7d7e8] hover:bg-white/[0.06]"
+              className="mb-2 flex w-full items-center justify-between rounded-lg px-2.5 py-2 text-[12px] font-medium text-[#d7d7e8] hover:bg-white/6"
             >
               Account settings
               <span className="text-[#6f6f82]">Open</span>
