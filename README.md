@@ -100,27 +100,6 @@ The application includes a modern dashboard with 4 main sections:
 - OpenAI Embeddings API
 - OpenAI Chat Completions API
 
----
-
-# 📸 Application Screenshots
-
-## 💬 Chat Interface
-
-![Chat UI](https://github.com/user-attachments/assets/3e796187-bb62-4602-b3c3-caeeadfe396f)
-
----
-
-## 📄 Document Management
-
-![Documents UI](https://github.com/user-attachments/assets/d809443f-e0e0-4294-a513-a48fc2688ee1)
-
----
-
-## 🤖 AI Retrieval & Responses
-
-![AI Chat](https://github.com/user-attachments/assets/3b3ebb56-c152-40d5-9785-a058d2e48360)
-
----
 
 # 🧠 How RAG Works
 
