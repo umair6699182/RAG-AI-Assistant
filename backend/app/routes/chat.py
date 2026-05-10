@@ -1,12 +1,14 @@
 import json
 from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from openai import OpenAI
 
+from app.auth import CurrentUser, get_current_user
 from app.core.config import supabase
+from app.services.user_data import require_user_conversation, require_user_document
 
 router = APIRouter()
 
@@ -44,13 +46,23 @@ def create_query_embedding(query: str) -> List[float]:
     return response.data[0].embedding
 
 
-def get_or_create_conversation(document_id: str, conversation_id: Optional[str]) -> str:
+def get_or_create_conversation(
+    document_id: str,
+    conversation_id: Optional[str],
+    user_id: str,
+    title: str = "New Chat",
+) -> str:
     if conversation_id:
+        require_user_conversation(
+            conversation_id=conversation_id,
+            document_id=document_id,
+            user_id=user_id,
+        )
         return conversation_id
 
     response = supabase.table("conversations").insert({
         "document_id": document_id,
-        "title": "New Chat",
+        "title": title[:80] or "New Chat",
     }).execute()
 
     if not response.data:
@@ -61,6 +73,7 @@ def get_or_create_conversation(document_id: str, conversation_id: Optional[str])
 
 def save_message(
     conversation_id: str,
+    user_id: str,
     role: str,
     content: str,
     sources: Optional[List[dict]] = None,
@@ -73,7 +86,11 @@ def save_message(
     }).execute()
 
 
-def get_conversation_history(conversation_id: str, limit: int = 10) -> List[dict]:
+def get_conversation_history(
+    conversation_id: str,
+    user_id: str,
+    limit: int = 10,
+) -> List[dict]:
     response = (
         supabase.table("messages")
         .select("role, content")
@@ -185,6 +202,7 @@ def stream_answer(
     history: List[dict],
     sources: List[dict],
     conversation_id: str,
+    user_id: str,
 ):
     full_answer = ""
 
@@ -208,6 +226,7 @@ def stream_answer(
 
         save_message(
             conversation_id=conversation_id,
+            user_id=user_id,
             role="assistant",
             content=full_answer,
             sources=sources,
@@ -220,15 +239,31 @@ def stream_answer(
 
 
 @router.post("/chat", response_model=ChatResponse)
-async def chat_with_document(body: ChatRequest):
+async def chat_with_document(
+    body: ChatRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     try:
+        require_user_document(
+            document_id=body.document_id,
+            user_id=current_user.id,
+        )
+
         conversation_id = get_or_create_conversation(
             document_id=body.document_id,
             conversation_id=body.conversation_id,
+            user_id=current_user.id,
+            title=body.message,
+        )
+
+        history = get_conversation_history(
+            conversation_id=conversation_id,
+            user_id=current_user.id,
         )
 
         save_message(
             conversation_id=conversation_id,
+            user_id=current_user.id,
             role="user",
             content=body.message,
         )
@@ -246,6 +281,7 @@ async def chat_with_document(body: ChatRequest):
 
             save_message(
                 conversation_id=conversation_id,
+                user_id=current_user.id,
                 role="assistant",
                 content=answer,
                 sources=[],
@@ -260,8 +296,6 @@ async def chat_with_document(body: ChatRequest):
         context = build_context(matched_chunks)
         sources = build_sources(matched_chunks)
 
-        history = get_conversation_history(conversation_id)
-
         answer = generate_answer(
             user_message=body.message,
             context=context,
@@ -270,6 +304,7 @@ async def chat_with_document(body: ChatRequest):
 
         save_message(
             conversation_id=conversation_id,
+            user_id=current_user.id,
             role="assistant",
             content=answer,
             sources=sources,
@@ -281,6 +316,9 @@ async def chat_with_document(body: ChatRequest):
             "sources": sources,
         }
 
+    except HTTPException:
+        raise
+
     except Exception as e:
         raise HTTPException(
             status_code=500,
@@ -289,15 +327,31 @@ async def chat_with_document(body: ChatRequest):
 
 
 @router.post("/chat/stream")
-async def chat_with_document_stream(body: ChatRequest):
+async def chat_with_document_stream(
+    body: ChatRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     try:
+        require_user_document(
+            document_id=body.document_id,
+            user_id=current_user.id,
+        )
+
         conversation_id = get_or_create_conversation(
             document_id=body.document_id,
             conversation_id=body.conversation_id,
+            user_id=current_user.id,
+            title=body.message,
+        )
+
+        history = get_conversation_history(
+            conversation_id=conversation_id,
+            user_id=current_user.id,
         )
 
         save_message(
             conversation_id=conversation_id,
+            user_id=current_user.id,
             role="user",
             content=body.message,
         )
@@ -316,6 +370,7 @@ async def chat_with_document_stream(body: ChatRequest):
 
                 save_message(
                     conversation_id=conversation_id,
+                    user_id=current_user.id,
                     role="assistant",
                     content=answer,
                     sources=[],
@@ -332,7 +387,6 @@ async def chat_with_document_stream(body: ChatRequest):
 
         context = build_context(matched_chunks)
         sources = build_sources(matched_chunks)
-        history = get_conversation_history(conversation_id)
 
         return StreamingResponse(
             stream_answer(
@@ -341,6 +395,7 @@ async def chat_with_document_stream(body: ChatRequest):
                 history=history,
                 sources=sources,
                 conversation_id=conversation_id,
+                user_id=current_user.id,
             ),
             media_type="text/event-stream",
             headers={
@@ -348,6 +403,9 @@ async def chat_with_document_stream(body: ChatRequest):
                 "Connection": "keep-alive",
             },
         )
+
+    except HTTPException:
+        raise
 
     except Exception as e:
         raise HTTPException(

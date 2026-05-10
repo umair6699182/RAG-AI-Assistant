@@ -1,12 +1,13 @@
-from io import BytesIO
-from typing import List
+from typing import List, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
-from pypdf import PdfReader
+import fitz
 from openai import OpenAI
 
+from app.auth import CurrentUser, get_current_user
 from app.core.config import supabase
+from app.services.user_data import is_user_storage_path
 
 router = APIRouter()
 
@@ -18,16 +19,19 @@ openai_client = OpenAI()
 
 class ProcessDocumentRequest(BaseModel):
     storage_path: str = Field(..., min_length=1)
+    file_size: int = Field(default=0, ge=0)
+    file_name: Optional[str] = None
 
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
-    reader = PdfReader(BytesIO(file_bytes))
     text_parts = []
 
-    for page in reader.pages:
-        page_text = page.extract_text()
-        if page_text:
-            text_parts.append(page_text)
+    with fitz.open(stream=file_bytes, filetype="pdf") as document:
+        for page in document:
+            page_text = page.get_text()
+
+            if page_text:
+                text_parts.append(page_text)
 
     return "\n".join(text_parts)
 
@@ -58,10 +62,19 @@ def create_embeddings(chunks: List[str]) -> List[List[float]]:
 
 
 @router.post("/process-document")
-async def process_document(body: ProcessDocumentRequest):
+async def process_document(
+    body: ProcessDocumentRequest,
+    current_user: CurrentUser = Depends(get_current_user),
+):
     try:
         storage_path = body.storage_path
-        file_name = storage_path.split("/")[-1]
+        file_name = body.file_name or storage_path.split("/")[-1]
+
+        if not is_user_storage_path(storage_path, current_user.id):
+            raise HTTPException(
+                status_code=403,
+                detail="Storage path does not belong to this user",
+            )
 
         # 1. Create document row first
         document_response = supabase.table("documents").insert({
@@ -128,9 +141,12 @@ async def process_document(body: ProcessDocumentRequest):
         # 7. Return document_id to frontend
         return {
             "message": "Document processed successfully",
+            "id": document_id,
             "document_id": document_id,
             "storage_path": storage_path,
             "file_name": file_name,
+            "name": file_name,
+            "file_size": body.file_size,
             "total_chunks": len(chunks),
         }
 

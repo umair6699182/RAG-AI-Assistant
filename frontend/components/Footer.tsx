@@ -1,6 +1,14 @@
 const FOOTER_LINKS = ["Privacy", "Docs", "Support"];
 
-export default function Footer() {
+interface FooterProps {
+  documentCount: number;
+  totalChunks: number;
+}
+
+export default function Footer({
+  documentCount,
+  totalChunks,
+}: FooterProps) {
   return (
     <footer className="h-9 border-t border-white/[0.07] flex items-center justify-between px-5 bg-[#080812]/95 shrink-0">
       <div className="flex items-center gap-3">
@@ -24,13 +32,13 @@ export default function Footer() {
           >
             <rect x="2" y="3" width="12" height="10" rx="1.5" />
           </svg>
-          4 documents · 12.6 MB
+          {documentCount} documents · {totalChunks} chunks
         </div>
 
         <div className="w-px h-3 bg-white/[0.07]" />
 
         {/* Model */}
-        <span className="text-[10px] text-[#5a5a6e]">Model: claude-sonnet</span>
+        <span className="text-[10px] text-[#5a5a6e]">Model: gpt-4o-mini</span>
       </div>
 
       {/* Links */}

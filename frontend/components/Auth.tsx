@@ -45,7 +45,7 @@ export default function AuthPage() {
         // If email confirmation is disabled
         toast.success("Signup successful! You are now logged in.");
       }
-    } catch (err) {
+    } catch {
       toast.error("Something went wrong. Please try again.");
     } finally {
       setLoading(false);
@@ -60,11 +60,21 @@ export default function AuthPage() {
     });
     setLoading(false);
     if (error) return toast(error.message);
-    router.push("/");
+    router.push("/chat");
+    router.refresh();
   };
 
   const handleGoogle = async () => {
-    await supabase.auth.signInWithOAuth({ provider: "google" });
+    const { error } = await supabase.auth.signInWithOAuth({
+      provider: "google",
+      options: {
+        redirectTo: `${window.location.origin}/auth/callback?next=/chat`,
+      },
+    });
+
+    if (error) {
+      toast.error(error.message);
+    }
   };
 
   const features = [

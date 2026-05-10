@@ -3,6 +3,12 @@
 import { useEffect, useRef, useState } from "react";
 
 import MessageBubble from "./MessageBubble";
+import {
+  deleteConversation,
+  getDocumentMessages,
+  streamChat,
+} from "@/services/api";
+import { toast } from "sonner";
 
 interface Source {
   content: string;
@@ -33,21 +39,33 @@ const HINTS = [
   "Give me important points",
 ];
 
+function getInitialMessages(
+  documentId?: string,
+  documentName?: string,
+): Message[] {
+  return [
+    {
+      role: "assistant",
+      content: documentId
+        ? `I've indexed "${documentName || "your document"}". Ask me anything about it.`
+        : "Upload and select a document to start chatting with your AI assistant.",
+    },
+  ];
+}
+
 export default function ChatBox({
   documentId,
   documentName,
 }: ChatBoxProps) {
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content:
-        "Upload and select a document to start chatting with your AI assistant.",
-    },
-  ]);
+  const [messages, setMessages] = useState<Message[]>(() =>
+    getInitialMessages(documentId, documentName),
+  );
 
   const [question, setQuestion] = useState("");
 
   const [loading, setLoading] = useState(false);
+  const [deletingConversation, setDeletingConversation] =
+    useState(false);
 
   const [conversationId, setConversationId] = useState<
     string | undefined
@@ -57,25 +75,47 @@ export default function ChatBox({
 
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
+  const userInteractedRef = useRef(false);
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({
       behavior: "smooth",
     });
   }, [messages, loading]);
 
-  // Reset chat when document changes
   useEffect(() => {
     if (!documentId) return;
 
-    setConversationId(undefined);
+    let cancelled = false;
 
-    setMessages([
-      {
-        role: "assistant",
-        content: `I've indexed "${documentName || "your document"}". Ask me anything about it.`,
-      },
-    ]);
-  }, [documentId, documentName]);
+    getDocumentMessages(documentId)
+      .then((data) => {
+        if (cancelled || userInteractedRef.current) return;
+
+        setConversationId(data.conversation_id || undefined);
+
+        if (data.messages.length > 0) {
+          setMessages(
+            data.messages.map((message) => ({
+              role: message.role,
+              content: message.content,
+              sources: message.sources,
+            })),
+          );
+        }
+      })
+      .catch((error) => {
+        console.error("Load chat history error:", error);
+
+        if (!cancelled) {
+          toast.error("Failed to load chat history.");
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [documentId]);
 
   const send = async (text?: string) => {
     const q = (text ?? question).trim();
@@ -86,6 +126,8 @@ export default function ChatBox({
       role: "user",
       content: q,
     };
+
+    userInteractedRef.current = true;
 
     const assistantMessage: Message = {
       role: "assistant",
@@ -104,21 +146,12 @@ export default function ChatBox({
     setLoading(true);
 
     try {
-      const response = await fetch(
-        "http://localhost:8000/chat/stream",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            message: q,
-            document_id: documentId,
-            conversation_id: conversationId,
-            match_count: 5,
-          }),
-        },
-      );
+      const response = await streamChat({
+        message: q,
+        document_id: documentId,
+        conversation_id: conversationId,
+        match_count: 5,
+      });
 
       if (!response.ok || !response.body) {
         throw new Error("Streaming failed");
@@ -232,17 +265,45 @@ export default function ChatBox({
     }
   };
 
-  const clearChat = () => {
+  const startNewChat = () => {
+    userInteractedRef.current = true;
+
     setConversationId(undefined);
 
     setMessages([
       {
         role: "assistant",
         content: documentId
-          ? `Chat cleared. Ask me anything about "${documentName}".`
+          ? `Started a new chat for "${documentName}".`
           : "Upload a document to begin chatting.",
       },
     ]);
+  };
+
+  const handleDeleteConversation = async () => {
+    if (!documentId || !conversationId) return;
+
+    const confirmed = window.confirm(
+      "Delete this conversation and its messages?",
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setDeletingConversation(true);
+
+      await deleteConversation(documentId, conversationId);
+
+      userInteractedRef.current = true;
+      setConversationId(undefined);
+      setMessages(getInitialMessages(documentId, documentName));
+      toast.success("Conversation deleted.");
+    } catch (error) {
+      console.error("Delete conversation error:", error);
+      toast.error("Failed to delete conversation.");
+    } finally {
+      setDeletingConversation(false);
+    }
   };
 
   return (
@@ -280,9 +341,33 @@ export default function ChatBox({
         {/* Actions */}
         <div className="flex gap-1.5">
           <button
-            onClick={clearChat}
-            title="Clear chat"
+            onClick={startNewChat}
+            disabled={!documentId || loading}
+            title="New chat"
             className="w-7 h-7 rounded-lg border border-white/12 bg-[#111118] flex items-center justify-center text-[#8b8b9a] hover:text-white hover:bg-white/8 transition-all duration-150"
+          >
+            <svg
+              width="13"
+              height="13"
+              viewBox="0 0 16 16"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="1.5"
+            >
+              <path d="M8 3v10M3 8h10" />
+            </svg>
+          </button>
+
+          <button
+            onClick={handleDeleteConversation}
+            disabled={
+              !documentId ||
+              !conversationId ||
+              loading ||
+              deletingConversation
+            }
+            title="Delete conversation"
+            className="w-7 h-7 rounded-lg border border-red-400/15 bg-red-500/8 flex items-center justify-center text-red-300/70 hover:text-red-200 hover:bg-red-500/15 disabled:cursor-not-allowed disabled:opacity-40 transition-all duration-150"
           >
             <svg
               width="13"

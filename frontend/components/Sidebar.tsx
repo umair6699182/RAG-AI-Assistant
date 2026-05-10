@@ -1,7 +1,13 @@
 "use client";
 
-import { useState, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { supabase } from "@/lib/supabaseClient";
+import {
+  ApiDocument,
+  deleteDocument,
+  listDocuments,
+  processDocument,
+} from "@/services/api";
 import { toast } from "sonner";
 
 interface Doc {
@@ -9,26 +15,68 @@ interface Doc {
   document_id: string;
   name: string;
   size: string;
+  file_size?: number;
   total_chunks?: number;
   storage_path: string;
 }
 
 interface SidebarProps {
   activeDocId?: string;
-  onSelectDoc?: (doc: Doc) => void;
+  onDocumentsChange?: (docs: Doc[]) => void;
+  onSelectDoc?: (doc: Doc | null) => void;
   onUpload?: (file: File) => void;
 }
 
 export default function Sidebar({
   activeDocId,
+  onDocumentsChange,
   onSelectDoc,
   onUpload,
 }: SidebarProps) {
   const [docs, setDocs] = useState<Doc[]>([]);
-  const [selected, setSelected] = useState<string>("");
   const [uploading, setUploading] = useState(false);
+  const [loadingDocs, setLoadingDocs] = useState(true);
+  const [deletingDocId, setDeletingDocId] = useState<string | null>(
+    null,
+  );
 
   const fileRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    async function loadSavedDocuments() {
+      try {
+        const { documents } = await listDocuments();
+        const loadedDocs = documents.map(toDoc);
+
+        if (cancelled) return;
+
+        setDocs(loadedDocs);
+        onDocumentsChange?.(loadedDocs);
+
+        if (loadedDocs.length > 0) {
+          onSelectDoc?.(loadedDocs[0]);
+        }
+      } catch (error) {
+        console.error("Load documents error:", error);
+
+        if (!cancelled) {
+          toast.error("Failed to load saved documents.");
+        }
+      } finally {
+        if (!cancelled) {
+          setLoadingDocs(false);
+        }
+      }
+    }
+
+    loadSavedDocuments();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [onDocumentsChange, onSelectDoc]);
 
   const handleFileChange = async (
     e: React.ChangeEvent<HTMLInputElement>,
@@ -53,8 +101,19 @@ export default function Sidebar({
     const loadingToast = toast.loading("Uploading PDF...");
 
     try {
+      const {
+        data: { session },
+      } = await supabase.auth.getSession();
+
+      if (!session) {
+        return toast.error("Please sign in again before uploading.", {
+          id: loadingToast,
+        });
+      }
+
       // Generate unique storage path
-      const filePath = `uploads/${crypto.randomUUID()}-${file.name}`;
+      const safeFileName = file.name.replace(/[^\w.-]+/g, "_");
+      const filePath = `uploads/${session.user.id}/${crypto.randomUUID()}-${safeFileName}`;
 
       // Upload to Supabase Storage
       const { data, error } = await supabase.storage
@@ -81,46 +140,18 @@ export default function Sidebar({
       });
 
       // Process document in backend
-      const processResponse = await fetch(
-        "http://localhost:8000/process-document",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            storage_path: data.path,
-          }),
-        },
+      const processData = await processDocument(
+        data.path,
+        file.size,
+        file.name,
       );
-
-      const processData = await processResponse.json();
-
-      if (!processResponse.ok) {
-        console.error("Process document error:", processData);
-
-        return toast.error(
-          processData.detail || "Document processing failed.",
-          {
-            id: loadingToast,
-          },
-        );
-      }
-
-      // Create local document object
-      const newDoc: Doc = {
-        id: processData.document_id,
-        document_id: processData.document_id,
-        name: processData.file_name || file.name,
-        size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        total_chunks: processData.total_chunks || 0,
-        storage_path: processData.storage_path,
-      };
+      const newDoc = toDoc(processData);
 
       // Update UI
-      setDocs((prev) => [newDoc, ...prev]);
+      const nextDocs = [newDoc, ...docs];
 
-      setSelected(newDoc.id);
+      setDocs(nextDocs);
+      onDocumentsChange?.(nextDocs);
 
       onSelectDoc?.(newDoc);
 
@@ -145,12 +176,52 @@ export default function Sidebar({
     }
   };
 
+  const handleDeleteDocument = async (
+    e: React.MouseEvent<HTMLButtonElement>,
+    doc: Doc,
+  ) => {
+    e.stopPropagation();
+
+    const confirmed = window.confirm(
+      `Delete "${doc.name}" and its chat history?`,
+    );
+
+    if (!confirmed) return;
+
+    try {
+      setDeletingDocId(doc.document_id);
+
+      await deleteDocument(doc.document_id);
+
+      const remainingDocs = docs.filter(
+        (item) => item.document_id !== doc.document_id,
+      );
+
+      setDocs(remainingDocs);
+      onDocumentsChange?.(remainingDocs);
+
+      if (activeDocId === doc.document_id) {
+        onSelectDoc?.(remainingDocs[0] ?? null);
+      }
+
+      toast.success("Document deleted.");
+    } catch (error) {
+      console.error("Delete document error:", error);
+      toast.error("Failed to delete document.");
+    } finally {
+      setDeletingDocId(null);
+    }
+  };
+
   // Storage calculation
-  const totalMB = docs.reduce((acc, doc) => {
-    return acc + Number(doc.size.replace(" MB", ""));
+  const totalBytes = docs.reduce((acc, doc) => {
+    return acc + (doc.file_size || 0);
   }, 0);
 
-  const storagePct = Math.min((totalMB / 25) * 100, 100).toFixed(0);
+  const storagePct = Math.min(
+    (totalBytes / (25 * 1024 * 1024)) * 100,
+    100,
+  ).toFixed(0);
 
   return (
     <aside className="w-[350px] border-r border-white/[0.07] bg-[#111118] flex flex-col shrink-0">
@@ -199,22 +270,25 @@ export default function Sidebar({
 
       {/* Documents */}
       <div className="flex-1 overflow-y-auto px-2.5 py-1 space-y-0.5">
-        {docs.length === 0 && (
+        {loadingDocs && (
+          <p className="text-[11px] text-[#5a5a6e] px-2 py-3">
+            Loading saved PDFs...
+          </p>
+        )}
+
+        {!loadingDocs && docs.length === 0 && (
           <p className="text-[11px] text-[#5a5a6e] px-2 py-3">
             No PDFs uploaded yet.
           </p>
         )}
 
         {docs.map((doc) => {
-          const isActive =
-            selected === doc.id || activeDocId === doc.id;
+          const isActive = activeDocId === doc.id;
 
           return (
             <div
               key={doc.id}
               onClick={() => {
-                setSelected(doc.id);
-
                 onSelectDoc?.(doc);
               }}
               className={`flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer border transition-all duration-150 ${
@@ -250,6 +324,24 @@ export default function Sidebar({
               </div>
 
               {/* Active Indicator */}
+              <button
+                onClick={(e) => handleDeleteDocument(e, doc)}
+                disabled={deletingDocId === doc.document_id}
+                title="Delete document"
+                className="w-6 h-6 rounded-md flex items-center justify-center text-[#5a5a6e] hover:text-red-300 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40 transition-colors duration-150"
+              >
+                <svg
+                  width="12"
+                  height="12"
+                  viewBox="0 0 16 16"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                >
+                  <path d="M3 4h10M6 4V3h4v1M5 4v8h6V4" />
+                </svg>
+              </button>
+
               {isActive && (
                 <div className="w-1.5 h-1.5 rounded-full bg-[#7c6af7] shrink-0" />
               )}
@@ -277,4 +369,26 @@ export default function Sidebar({
       </div>
     </aside>
   );
+}
+
+function toDoc(doc: ApiDocument): Doc {
+  const fileSize = doc.file_size || 0;
+
+  return {
+    id: doc.document_id || doc.id,
+    document_id: doc.document_id || doc.id,
+    name: doc.name || doc.file_name || "Untitled PDF",
+    size: formatFileSize(fileSize),
+    file_size: fileSize,
+    total_chunks: doc.total_chunks || 0,
+    storage_path: doc.storage_path,
+  };
+}
+
+function formatFileSize(bytes: number) {
+  if (!bytes) {
+    return "0 MB";
+  }
+
+  return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 }
