@@ -6,10 +6,11 @@ import { toast } from "sonner";
 
 interface Doc {
   id: string;
+  document_id: string;
   name: string;
   size: string;
-  pages: number;
-  storage_path?: string;
+  total_chunks?: number;
+  storage_path: string;
 }
 
 interface SidebarProps {
@@ -26,8 +27,12 @@ export default function Sidebar({
   const [docs, setDocs] = useState<Doc[]>([]);
   const [selected, setSelected] = useState<string>("");
   const [uploading, setUploading] = useState(false);
+
   const fileRef = useRef<HTMLInputElement>(null);
-  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+
+  const handleFileChange = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+  ) => {
     const file = e.target.files?.[0];
 
     if (!file) {
@@ -38,19 +43,20 @@ export default function Sidebar({
       return toast.error("Please upload a valid PDF file.");
     }
 
-    // Optional: File size validation (example: 10MB)
+    // Max 10MB
     if (file.size > 10 * 1024 * 1024) {
       return toast.error("File size must be less than 10MB.");
     }
 
     setUploading(true);
 
-    // Loading toast
     const loadingToast = toast.loading("Uploading PDF...");
 
     try {
+      // Generate unique storage path
       const filePath = `uploads/${crypto.randomUUID()}-${file.name}`;
 
+      // Upload to Supabase Storage
       const { data, error } = await supabase.storage
         .from("documents")
         .upload(filePath, file, {
@@ -61,15 +67,20 @@ export default function Sidebar({
       if (error) {
         console.error("Supabase upload error:", error);
 
-        toast.dismiss(loadingToast);
-        return toast.error(error.message || "Failed to upload PDF.");
+        return toast.error(
+          error.message || "Failed to upload PDF.",
+          {
+            id: loadingToast,
+          },
+        );
       }
 
-      // Update loading state
+      // Update loading toast
       toast.loading("Processing document...", {
         id: loadingToast,
       });
 
+      // Process document in backend
       const processResponse = await fetch(
         "http://localhost:8000/process-document",
         {
@@ -88,51 +99,62 @@ export default function Sidebar({
       if (!processResponse.ok) {
         console.error("Process document error:", processData);
 
-        toast.dismiss(loadingToast);
-
-        return toast.error(processData.detail || "Document processing failed.");
+        return toast.error(
+          processData.detail || "Document processing failed.",
+          {
+            id: loadingToast,
+          },
+        );
       }
 
+      // Create local document object
       const newDoc: Doc = {
-        id: crypto.randomUUID(),
-        name: file.name,
+        id: processData.document_id,
+        document_id: processData.document_id,
+        name: processData.file_name || file.name,
         size: `${(file.size / 1024 / 1024).toFixed(1)} MB`,
-        pages: processData.pages || 0,
-        storage_path: data.path,
+        total_chunks: processData.total_chunks || 0,
+        storage_path: processData.storage_path,
       };
 
+      // Update UI
       setDocs((prev) => [newDoc, ...prev]);
+
       setSelected(newDoc.id);
 
       onSelectDoc?.(newDoc);
+
       onUpload?.(file);
 
       toast.success("PDF uploaded & processed successfully!", {
         id: loadingToast,
       });
     } catch (error) {
-      console.error(error);
+      console.error("Upload error:", error);
 
-      toast.dismiss(loadingToast);
-
-      toast.error("Something went wrong during upload.");
+      toast.error("Something went wrong during upload.", {
+        id: loadingToast,
+      });
     } finally {
       setUploading(false);
 
+      // Reset input
       if (fileRef.current) {
         fileRef.current.value = "";
       }
     }
   };
 
-  const totalMB = docs.reduce((acc, d) => {
-    return acc + Number(d.size.replace(" MB", ""));
+  // Storage calculation
+  const totalMB = docs.reduce((acc, doc) => {
+    return acc + Number(doc.size.replace(" MB", ""));
   }, 0);
 
   const storagePct = Math.min((totalMB / 25) * 100, 100).toFixed(0);
 
   return (
     <aside className="w-[350px] border-r border-white/[0.07] bg-[#111118] flex flex-col shrink-0">
+      {/* Header */}
       <div className="px-3.5 pt-3 pb-2">
         <p className="text-[10px] font-semibold tracking-[0.8px] uppercase text-[#5a5a6e] mb-2.5">
           Library
@@ -149,7 +171,7 @@ export default function Sidebar({
         <button
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
-          className="flex items-center cursor-pointer gap-1.5 w-full px-2.5 py-2 rounded-lg border border-dashed border-[#7c6af7]/35 bg-[#7c6af7]/06 text-[#a78bfa] text-[12px] font-medium transition-all duration-150 hover:border-[#7c6af7]/60 hover:bg-[#7c6af7]/12 disabled:opacity-50 disabled:cursor-not-allowed"
+          className="flex items-center cursor-pointer gap-1.5 w-full px-2.5 py-2 rounded-lg border border-dashed border-[#7c6af7]/35 bg-[#7c6af7]/6 text-[#a78bfa] text-[12px] font-medium transition-all duration-150 hover:border-[#7c6af7]/60 hover:bg-[#7c6af7]/12 disabled:opacity-50 disabled:cursor-not-allowed"
         >
           <svg
             width="14"
@@ -161,13 +183,21 @@ export default function Sidebar({
             className="shrink-0"
           >
             <path d="M8 10V4M5 7l3-3 3 3" />
-            <rect x="2" y="11" width="12" height="3" rx="1" />
+
+            <rect
+              x="2"
+              y="11"
+              width="12"
+              height="3"
+              rx="1"
+            />
           </svg>
 
           {uploading ? "Uploading..." : "Upload PDF"}
         </button>
       </div>
 
+      {/* Documents */}
       <div className="flex-1 overflow-y-auto px-2.5 py-1 space-y-0.5">
         {docs.length === 0 && (
           <p className="text-[11px] text-[#5a5a6e] px-2 py-3">
@@ -176,13 +206,15 @@ export default function Sidebar({
         )}
 
         {docs.map((doc) => {
-          const isActive = selected === doc.id || activeDocId === doc.id;
+          const isActive =
+            selected === doc.id || activeDocId === doc.id;
 
           return (
             <div
               key={doc.id}
               onClick={() => {
                 setSelected(doc.id);
+
                 onSelectDoc?.(doc);
               }}
               className={`flex items-center gap-2 px-2 py-2 rounded-lg cursor-pointer border transition-all duration-150 ${
@@ -191,6 +223,7 @@ export default function Sidebar({
                   : "border-transparent hover:bg-white/4 hover:border-white/[0.07]"
               }`}
             >
+              {/* PDF Icon */}
               <div
                 className={`w-[26px] h-[32px] rounded flex items-center justify-center text-[8px] font-bold tracking-wider shrink-0 ${
                   isActive
@@ -201,6 +234,7 @@ export default function Sidebar({
                 PDF
               </div>
 
+              {/* Document Info */}
               <div className="min-w-0 flex-1">
                 <p className="text-[12px] font-medium text-white truncate leading-tight">
                   {doc.name.replace(".pdf", "")}
@@ -208,10 +242,14 @@ export default function Sidebar({
 
                 <p className="text-[10px] text-[#5a5a6e] mt-0.5">
                   {doc.size}
-                  {doc.pages > 0 ? ` · ${doc.pages}p` : ""}
+
+                  {doc.total_chunks
+                    ? ` · ${doc.total_chunks} chunks`
+                    : ""}
                 </p>
               </div>
 
+              {/* Active Indicator */}
               {isActive && (
                 <div className="w-1.5 h-1.5 rounded-full bg-[#7c6af7] shrink-0" />
               )}
@@ -220,16 +258,20 @@ export default function Sidebar({
         })}
       </div>
 
+      {/* Storage */}
       <div className="px-3.5 py-3 border-t border-white/[0.07]">
         <div className="flex justify-between text-[10px] text-[#5a5a6e] mb-1.5">
           <span>Storage</span>
+
           <span>{storagePct}%</span>
         </div>
 
         <div className="h-[3px] rounded-full bg-white/6 overflow-hidden">
           <div
             className="h-full rounded-full bg-linear-to-r from-[#7c6af7] to-[#a78bfa] transition-all duration-500"
-            style={{ width: `${storagePct}%` }}
+            style={{
+              width: `${storagePct}%`,
+            }}
           />
         </div>
       </div>

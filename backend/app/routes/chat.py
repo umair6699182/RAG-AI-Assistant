@@ -1,5 +1,3 @@
-# app/routes/chat.py
-
 import json
 from typing import List, Optional
 
@@ -20,17 +18,20 @@ openai_client = OpenAI()
 
 class ChatRequest(BaseModel):
     message: str = Field(..., min_length=1)
-    file_id: Optional[str] = None
+    document_id: str = Field(..., min_length=1)
+    conversation_id: Optional[str] = None
     match_count: int = 5
 
 
 class ChatSource(BaseModel):
     content: str
+    document_id: Optional[str] = None
     file_id: Optional[str] = None
     metadata: Optional[dict] = None
 
 
 class ChatResponse(BaseModel):
+    conversation_id: str
     answer: str
     sources: List[ChatSource]
 
@@ -43,15 +44,57 @@ def create_query_embedding(query: str) -> List[float]:
     return response.data[0].embedding
 
 
+def get_or_create_conversation(document_id: str, conversation_id: Optional[str]) -> str:
+    if conversation_id:
+        return conversation_id
+
+    response = supabase.table("conversations").insert({
+        "document_id": document_id,
+        "title": "New Chat",
+    }).execute()
+
+    if not response.data:
+        raise HTTPException(status_code=500, detail="Failed to create conversation")
+
+    return response.data[0]["id"]
+
+
+def save_message(
+    conversation_id: str,
+    role: str,
+    content: str,
+    sources: Optional[List[dict]] = None,
+):
+    supabase.table("messages").insert({
+        "conversation_id": conversation_id,
+        "role": role,
+        "content": content,
+        "sources": sources,
+    }).execute()
+
+
+def get_conversation_history(conversation_id: str, limit: int = 10) -> List[dict]:
+    response = (
+        supabase.table("messages")
+        .select("role, content")
+        .eq("conversation_id", conversation_id)
+        .order("created_at", desc=False)
+        .limit(limit)
+        .execute()
+    )
+
+    return response.data or []
+
+
 def search_similar_chunks(
     query_embedding: List[float],
+    document_id: str,
     match_count: int = 5,
-    file_id: Optional[str] = None,
 ) -> List[dict]:
     params = {
         "query_embedding": query_embedding,
         "match_count": match_count,
-        "filter_file_id": file_id,
+        "filter_document_id": document_id,
     }
 
     response = supabase.rpc("match_chunks", params).execute()
@@ -72,67 +115,86 @@ def build_sources(chunks: List[dict]) -> List[dict]:
     sources = []
 
     for chunk in chunks:
-        sources.append(
-            {
-                "content": chunk.get("content", ""),
-                "file_id": chunk.get("file_id"),
-                "metadata": chunk.get("metadata"),
-            }
-        )
+        sources.append({
+            "content": chunk.get("content", ""),
+            "document_id": chunk.get("document_id"),
+            "file_id": chunk.get("file_id"),
+            "metadata": chunk.get("metadata"),
+        })
 
     return sources
 
 
-def get_chat_messages(user_message: str, context: str) -> List[dict]:
+def get_chat_messages(
+    user_message: str,
+    context: str,
+    history: List[dict],
+) -> List[dict]:
     system_prompt = """
-You are a helpful AI assistant.
+You are a helpful RAG AI assistant.
 
-Answer the user's question using only the provided document context.
+Use the provided document context to answer the user.
 
 Rules:
-- If the answer is in the context, answer clearly.
-- If the answer is not in the context, say you could not find it in the uploaded document.
+- Use document context first.
+- Use chat history only to understand follow-up questions.
+- If the answer is not in the document context, say you could not find it in the uploaded document.
 - Do not make up facts.
-- Keep the answer concise and helpful.
+- Keep the answer clear and helpful.
 """
 
-    return [
+    messages = [
         {
             "role": "system",
             "content": system_prompt,
         },
         {
-            "role": "user",
-            "content": f"""
-Document context:
-
-{context}
-
-User question:
-{user_message}
-""",
+            "role": "system",
+            "content": f"Document context:\n\n{context}",
         },
     ]
 
+    for item in history:
+        if item["role"] in ["user", "assistant"]:
+            messages.append({
+                "role": item["role"],
+                "content": item["content"],
+            })
 
-def generate_answer(user_message: str, context: str) -> str:
+    messages.append({
+        "role": "user",
+        "content": user_message,
+    })
+
+    return messages
+
+
+def generate_answer(user_message: str, context: str, history: List[dict]) -> str:
     response = openai_client.chat.completions.create(
         model=CHAT_MODEL,
-        messages=get_chat_messages(user_message, context),
+        messages=get_chat_messages(user_message, context, history),
         temperature=0.2,
     )
 
     return response.choices[0].message.content or ""
 
 
-def stream_answer(user_message: str, context: str, sources: List[dict]):
+def stream_answer(
+    user_message: str,
+    context: str,
+    history: List[dict],
+    sources: List[dict],
+    conversation_id: str,
+):
+    full_answer = ""
+
     try:
-        # Optional: send sources first
+        yield f"data: {json.dumps({'type': 'conversation', 'conversation_id': conversation_id})}\n\n"
         yield f"data: {json.dumps({'type': 'sources', 'sources': sources})}\n\n"
 
         stream = openai_client.chat.completions.create(
             model=CHAT_MODEL,
-            messages=get_chat_messages(user_message, context),
+            messages=get_chat_messages(user_message, context, history),
             temperature=0.2,
             stream=True,
         )
@@ -141,7 +203,15 @@ def stream_answer(user_message: str, context: str, sources: List[dict]):
             token = chunk.choices[0].delta.content
 
             if token:
+                full_answer += token
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+        save_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=full_answer,
+            sources=sources,
+        )
 
         yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
@@ -152,25 +222,61 @@ def stream_answer(user_message: str, context: str, sources: List[dict]):
 @router.post("/chat", response_model=ChatResponse)
 async def chat_with_document(body: ChatRequest):
     try:
+        conversation_id = get_or_create_conversation(
+            document_id=body.document_id,
+            conversation_id=body.conversation_id,
+        )
+
+        save_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=body.message,
+        )
+
         query_embedding = create_query_embedding(body.message)
 
         matched_chunks = search_similar_chunks(
             query_embedding=query_embedding,
+            document_id=body.document_id,
             match_count=body.match_count,
-            file_id=body.file_id,
         )
 
         if not matched_chunks:
+            answer = "I could not find relevant information in the uploaded document."
+
+            save_message(
+                conversation_id=conversation_id,
+                role="assistant",
+                content=answer,
+                sources=[],
+            )
+
             return {
-                "answer": "I could not find relevant information in the uploaded document.",
+                "conversation_id": conversation_id,
+                "answer": answer,
                 "sources": [],
             }
 
         context = build_context(matched_chunks)
-        answer = generate_answer(body.message, context)
         sources = build_sources(matched_chunks)
 
+        history = get_conversation_history(conversation_id)
+
+        answer = generate_answer(
+            user_message=body.message,
+            context=context,
+            history=history,
+        )
+
+        save_message(
+            conversation_id=conversation_id,
+            role="assistant",
+            content=answer,
+            sources=sources,
+        )
+
         return {
+            "conversation_id": conversation_id,
             "answer": answer,
             "sources": sources,
         }
@@ -185,17 +291,38 @@ async def chat_with_document(body: ChatRequest):
 @router.post("/chat/stream")
 async def chat_with_document_stream(body: ChatRequest):
     try:
+        conversation_id = get_or_create_conversation(
+            document_id=body.document_id,
+            conversation_id=body.conversation_id,
+        )
+
+        save_message(
+            conversation_id=conversation_id,
+            role="user",
+            content=body.message,
+        )
+
         query_embedding = create_query_embedding(body.message)
 
         matched_chunks = search_similar_chunks(
             query_embedding=query_embedding,
+            document_id=body.document_id,
             match_count=body.match_count,
-            file_id=body.file_id,
         )
 
         if not matched_chunks:
             async def no_result_stream():
-                yield f"data: {json.dumps({'type': 'token', 'content': 'I could not find relevant information in the uploaded document.'})}\n\n"
+                answer = "I could not find relevant information in the uploaded document."
+
+                save_message(
+                    conversation_id=conversation_id,
+                    role="assistant",
+                    content=answer,
+                    sources=[],
+                )
+
+                yield f"data: {json.dumps({'type': 'conversation', 'conversation_id': conversation_id})}\n\n"
+                yield f"data: {json.dumps({'type': 'token', 'content': answer})}\n\n"
                 yield f"data: {json.dumps({'type': 'done'})}\n\n"
 
             return StreamingResponse(
@@ -205,9 +332,16 @@ async def chat_with_document_stream(body: ChatRequest):
 
         context = build_context(matched_chunks)
         sources = build_sources(matched_chunks)
+        history = get_conversation_history(conversation_id)
 
         return StreamingResponse(
-            stream_answer(body.message, context, sources),
+            stream_answer(
+                user_message=body.message,
+                context=context,
+                history=history,
+                sources=sources,
+                conversation_id=conversation_id,
+            ),
             media_type="text/event-stream",
             headers={
                 "Cache-Control": "no-cache",

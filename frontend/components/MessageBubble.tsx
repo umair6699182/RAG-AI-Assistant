@@ -1,6 +1,12 @@
 interface Source {
-  label: string;
-  page?: number;
+  content: string;
+  document_id?: string;
+  file_id?: string;
+  metadata?: {
+    chunk_index?: number;
+    file_name?: string;
+    pages?: number;
+  };
 }
 
 interface MessageBubbleProps {
@@ -19,7 +25,11 @@ export default function MessageBubble({
   const isUser = role === "user";
 
   return (
-    <div className={`flex gap-2.5 ${isUser ? "flex-row-reverse" : ""}`}>
+    <div
+      className={`flex gap-2.5 ${
+        isUser ? "flex-row-reverse" : ""
+      }`}
+    >
       {/* Avatar */}
       <div
         className={`w-[26px] h-[26px] rounded-full shrink-0 mt-0.5 flex items-center justify-center text-[11px] font-semibold ${
@@ -28,49 +38,71 @@ export default function MessageBubble({
             : "bg-linear-to-br from-[#5a4fcf] to-[#7c6af7] text-white"
         }`}
       >
-        {isUser ? "JD" : "R"}
+        {isUser ? "U" : "AI"}
       </div>
 
-      <div className={`flex flex-col ${isUser ? "items-end" : "items-start"}`}>
-        {/* Bubble */}
+      <div
+        className={`flex flex-col ${
+          isUser ? "items-end" : "items-start"
+        }`}
+      >
+        {/* Typing */}
         {isTyping ? (
           <div className="flex items-center gap-1.5 px-4 py-3 bg-[#1c1c28] border border-white/[0.07] rounded-2xl rounded-tl-[4px]">
             {[0, 1, 2].map((i) => (
               <span
                 key={i}
                 className="w-1.5 h-1.5 rounded-full bg-[#5a5a6e] animate-bounce"
-                style={{ animationDelay: `${i * 0.15}s`, animationDuration: "1.2s" }}
+                style={{
+                  animationDelay: `${i * 0.15}s`,
+                  animationDuration: "1.2s",
+                }}
               />
             ))}
+
             <span className="text-[11px] text-[#5a5a6e] ml-1">
-              Retrieving relevant sections…
+              Thinking...
             </span>
           </div>
         ) : (
           <div
-            className={`max-w-[72%] px-3.5 py-2.5 text-[12.5px] leading-[1.55] ${
+            className={`max-w-[72%] px-3.5 py-2.5 text-[12.5px] leading-[1.6] whitespace-pre-wrap break-words ${
               isUser
                 ? "bg-[#7c6af7] text-white rounded-2xl rounded-tr-[4px]"
                 : "bg-[#1c1c28] text-white border border-white/[0.07] rounded-2xl rounded-tl-[4px]"
             }`}
-            dangerouslySetInnerHTML={{ __html: content }}
-          />
-        )}
-
-        {/* Source chips */}
-        {!isUser && sources && sources.length > 0 && (
-          <div className="flex flex-wrap gap-1.5 mt-2">
-            {sources.map((src, i) => (
-              <span
-                key={i}
-                className="text-[10px] px-2 py-0.5 rounded border bg-[#7c6af7]/08 text-[#a78bfa] border-[#7c6af7]/18 cursor-pointer hover:bg-[#7c6af7]/16 transition-colors duration-100"
-              >
-                {src.label}
-                {src.page ? ` · p.${src.page}` : ""}
-              </span>
-            ))}
+          >
+            {content}
           </div>
         )}
+
+        {/* Sources */}
+        {!isUser &&
+          sources &&
+          sources.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mt-2 max-w-[72%]">
+              {sources.map((src, i) => (
+                <div
+                  key={i}
+                  className="px-2.5 py-1.5 rounded-lg border border-[#7c6af7]/18 bg-[#7c6af7]/8 hover:bg-[#7c6af7]/14 transition-colors duration-150"
+                >
+                  {/* File Name */}
+                  <p className="text-[10px] font-medium text-[#a78bfa] truncate max-w-[220px]">
+                    {src.metadata?.file_name ||
+                      "Document Source"}
+                  </p>
+
+                  {/* Chunk */}
+                  {typeof src.metadata
+                    ?.chunk_index === "number" && (
+                    <p className="text-[9px] text-[#7d7d90] mt-0.5">
+                      Chunk #{src.metadata.chunk_index + 1}
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
       </div>
     </div>
   );

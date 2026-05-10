@@ -22,7 +22,6 @@ class ProcessDocumentRequest(BaseModel):
 
 def extract_text_from_pdf(file_bytes: bytes) -> str:
     reader = PdfReader(BytesIO(file_bytes))
-
     text_parts = []
 
     for page in reader.pages:
@@ -62,8 +61,23 @@ def create_embeddings(chunks: List[str]) -> List[List[float]]:
 async def process_document(body: ProcessDocumentRequest):
     try:
         storage_path = body.storage_path
+        file_name = storage_path.split("/")[-1]
 
-        # 1. Download PDF from Supabase Storage
+        # 1. Create document row first
+        document_response = supabase.table("documents").insert({
+            "storage_path": storage_path,
+            "file_name": file_name,
+        }).execute()
+
+        if not document_response.data:
+            raise HTTPException(
+                status_code=500,
+                detail="Failed to create document record",
+            )
+
+        document_id = document_response.data[0]["id"]
+
+        # 2. Download PDF from Supabase Storage
         file_bytes = supabase.storage.from_(BUCKET_NAME).download(storage_path)
 
         if not file_bytes:
@@ -72,7 +86,7 @@ async def process_document(body: ProcessDocumentRequest):
                 detail="File not found in Supabase Storage",
             )
 
-        # 2. Extract text from PDF
+        # 3. Extract text from PDF
         text = extract_text_from_pdf(file_bytes)
 
         if not text.strip():
@@ -81,7 +95,7 @@ async def process_document(body: ProcessDocumentRequest):
                 detail="No readable text found in PDF",
             )
 
-        # 3. Split text into chunks
+        # 4. Split text into chunks
         chunks = chunk_text(text)
 
         if not chunks:
@@ -90,29 +104,33 @@ async def process_document(body: ProcessDocumentRequest):
                 detail="No chunks created from document",
             )
 
-        # 4. Create embeddings
+        # 5. Create embeddings
         embeddings = create_embeddings(chunks)
 
-        # 5. Store chunks + embeddings in Supabase
+        # 6. Store chunks with document_id
         rows = []
 
         for index, chunk in enumerate(chunks):
-            rows.append(
-        {
-            "content": chunk,
-            "embedding": embeddings[index],
-            "file_id": storage_path,
-            "metadata": {
-                "chunk_index": index,
-                "storage_path": storage_path,
-            },
-        }
-    )
+            rows.append({
+                "document_id": document_id,
+                "content": chunk,
+                "embedding": embeddings[index],
+                "file_id": storage_path,
+                "metadata": {
+                    "chunk_index": index,
+                    "storage_path": storage_path,
+                    "file_name": file_name,
+                },
+            })
+
         supabase.table("chunks").insert(rows).execute()
 
+        # 7. Return document_id to frontend
         return {
             "message": "Document processed successfully",
+            "document_id": document_id,
             "storage_path": storage_path,
+            "file_name": file_name,
             "total_chunks": len(chunks),
         }
 
