@@ -514,8 +514,4 @@ If you found this project useful, consider giving it a **star ⭐** on GitHub.
 
 ---
 
-# 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome.
-
 Feel free to fork the repository and submit pull requests.
