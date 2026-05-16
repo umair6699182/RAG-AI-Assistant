@@ -74,7 +74,6 @@ The application includes a modern dashboard with 4 main sections:
 
 ## Frontend
 - Next.js 14
-- React.js
 - TypeScript
 - Tailwind CSS
 - Axios
@@ -85,7 +84,6 @@ The application includes a modern dashboard with 4 main sections:
 - FastAPI
 - Python
 - OpenAI SDK
-- LangChain (Optional)
 
 ---
 
