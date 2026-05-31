@@ -44,7 +44,8 @@ This application enables users to upload documents, generate embeddings, perform
 - PDF text extraction
 - Intelligent text chunking
 - OpenAI embedding generation
-- Vector similarity retrieval
+- Hybrid retrieval using vector search plus BM25 keyword search
+- Reciprocal Rank Fusion for combining retrieval results
 - Context injection into LLM prompts
 
 ---
@@ -110,9 +111,38 @@ The application includes a modern dashboard with 4 main sections:
 4. OpenAI generates vector embeddings
 5. Embeddings stored in PostgreSQL (pgvector)
 6. User asks a question
-7. Similar chunks retrieved using vector search
-8. Context sent to OpenAI
-9. AI generates contextual response
+7. Vector search retrieves semantically similar chunks
+8. BM25 keyword search retrieves exact text matches such as IDs, error codes, invoice numbers, version numbers, and names
+9. Reciprocal Rank Fusion merges both ranked result lists and deduplicates chunks
+10. Context sent to OpenAI
+11. AI generates contextual response
+```
+
+---
+
+# Hybrid Search
+
+Hybrid search is the default retrieval mode for chat. It combines:
+
+- Vector search through the existing Supabase `match_chunks` pgvector RPC for semantic matches, such as "work from home" matching "work remotely".
+- BM25 keyword search over the document chunks for exact identifiers, such as `ERR-9823`, `HR-2024-17`, `INV-89372`, or `v2.7.14`.
+
+The app does not add BM25 and vector scores directly because they use different scales. Instead, it applies Reciprocal Rank Fusion (RRF):
+
+```text
+fused_score += 1 / (rrf_k + rank)
+```
+
+Results are deduplicated by chunk/document identifiers and returned as the final top chunks ordered by fused score. Source metadata includes the fused `score` and `retrieval_type` when available.
+
+Hybrid search can be disabled per request by sending:
+
+```json
+{
+  "message": "What is this document about?",
+  "document_id": "document_uuid",
+  "hybrid_search_enabled": false
+}
 ```
 
 ---
@@ -172,6 +202,12 @@ SUPABASE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
 
 MODEL_NAME=gpt-4o-mini
 EMBEDDING_MODEL=text-embedding-3-small
+
+HYBRID_SEARCH_ENABLED=true
+VECTOR_TOP_K=5
+KEYWORD_TOP_K=5
+FINAL_TOP_K=5
+RRF_K=60
 ```
 
 ---
@@ -399,7 +435,13 @@ Uploads PDF documents and:
 ```json
 {
   "message": "What is this document about?",
-  "conversation_id": "conversation_uuid"
+  "document_id": "document_uuid",
+  "conversation_id": "conversation_uuid",
+  "hybrid_search_enabled": true,
+  "vector_top_k": 5,
+  "keyword_top_k": 5,
+  "final_top_k": 5,
+  "rrf_k": 60
 }
 ```
 

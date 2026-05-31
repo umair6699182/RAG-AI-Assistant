@@ -7,7 +7,9 @@ from pydantic import BaseModel, Field
 from openai import OpenAI
 
 from app.auth import CurrentUser, get_current_user
+from app.core.config import FINAL_TOP_K, KEYWORD_TOP_K, RRF_K, VECTOR_TOP_K
 from app.core.config import supabase
+from app.services.retrieval_service import search_hybrid_chunks, search_vector_chunks
 from app.services.user_data import require_user_conversation, require_user_document
 
 router = APIRouter()
@@ -23,6 +25,11 @@ class ChatRequest(BaseModel):
     document_id: str = Field(..., min_length=1)
     conversation_id: Optional[str] = None
     match_count: int = 5
+    hybrid_search_enabled: Optional[bool] = None
+    vector_top_k: Optional[int] = None
+    keyword_top_k: Optional[int] = None
+    final_top_k: Optional[int] = None
+    rrf_k: Optional[int] = None
 
 
 class ChatSource(BaseModel):
@@ -108,14 +115,11 @@ def search_similar_chunks(
     document_id: str,
     match_count: int = 5,
 ) -> List[dict]:
-    params = {
-        "query_embedding": query_embedding,
-        "match_count": match_count,
-        "filter_document_id": document_id,
-    }
-
-    response = supabase.rpc("match_chunks", params).execute()
-    return response.data or []
+    return search_vector_chunks(
+        query_embedding=query_embedding,
+        document_id=document_id,
+        top_k=match_count,
+    )
 
 
 def build_context(chunks: List[dict]) -> str:
@@ -132,14 +136,30 @@ def build_sources(chunks: List[dict]) -> List[dict]:
     sources = []
 
     for chunk in chunks:
+        metadata = dict(chunk.get("metadata") or {})
+        metadata["score"] = chunk.get("score")
+        metadata["retrieval_type"] = chunk.get("retrieval_type")
+
         sources.append({
             "content": chunk.get("content", ""),
             "document_id": chunk.get("document_id"),
             "file_id": chunk.get("file_id"),
-            "metadata": chunk.get("metadata"),
+            "metadata": metadata,
         })
 
     return sources
+
+
+def get_retrieval_options(body: ChatRequest) -> dict:
+    final_top_k = body.final_top_k or body.match_count or FINAL_TOP_K
+
+    return {
+        "hybrid_search_enabled": body.hybrid_search_enabled,
+        "vector_top_k": body.vector_top_k or body.match_count or VECTOR_TOP_K,
+        "keyword_top_k": body.keyword_top_k or KEYWORD_TOP_K,
+        "final_top_k": final_top_k,
+        "rrf_k": body.rrf_k or RRF_K,
+    }
 
 
 def get_chat_messages(
@@ -270,10 +290,11 @@ async def chat_with_document(
 
         query_embedding = create_query_embedding(body.message)
 
-        matched_chunks = search_similar_chunks(
+        matched_chunks = search_hybrid_chunks(
+            query=body.message,
             query_embedding=query_embedding,
             document_id=body.document_id,
-            match_count=body.match_count,
+            **get_retrieval_options(body),
         )
 
         if not matched_chunks:
@@ -358,10 +379,11 @@ async def chat_with_document_stream(
 
         query_embedding = create_query_embedding(body.message)
 
-        matched_chunks = search_similar_chunks(
+        matched_chunks = search_hybrid_chunks(
+            query=body.message,
             query_embedding=query_embedding,
             document_id=body.document_id,
-            match_count=body.match_count,
+            **get_retrieval_options(body),
         )
 
         if not matched_chunks:
