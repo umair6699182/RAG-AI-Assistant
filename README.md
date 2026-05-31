@@ -75,7 +75,6 @@ The application includes a modern dashboard with 4 main sections:
 
 ## Frontend
 - Next.js 14
-- React.js
 - TypeScript
 - Tailwind CSS
 - Axios
@@ -86,7 +85,6 @@ The application includes a modern dashboard with 4 main sections:
 - FastAPI
 - Python
 - OpenAI SDK
-- LangChain (Optional)
 
 ---
 
@@ -536,12 +534,6 @@ Recommended:
 
 ---
 
-# 📄 License
-
-This project is licensed under the MIT License.
-
----
-
 # 👨‍💻 Author
 
 Developed by **Umair Malik**
@@ -561,9 +553,5 @@ Built using:
 If you found this project useful, consider giving it a **star ⭐** on GitHub.
 
 ---
-
-# 🤝 Contributing
-
-Contributions, issues, and feature requests are welcome.
 
 Feel free to fork the repository and submit pull requests.
