@@ -196,7 +196,8 @@ Add:
 OPENAI_API_KEY=YOUR_OPENAI_API_KEY
 
 SUPABASE_URL=YOUR_SUPABASE_URL
-SUPABASE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+SUPABASE_SERVICE_ROLE_KEY=YOUR_SUPABASE_SERVICE_ROLE_KEY
+# SUPABASE_KEY is still accepted as a legacy fallback, but prefer SUPABASE_SERVICE_ROLE_KEY.
 
 MODEL_NAME=gpt-4o-mini
 EMBEDDING_MODEL=text-embedding-3-small
@@ -498,14 +499,157 @@ Deletes:
 - Store secrets in `.env`
 - Add `.env` to `.gitignore`
 - Use Supabase Service Role Key only on backend
+- Never prefix service role keys with `NEXT_PUBLIC_`
+- Frontend should only use `NEXT_PUBLIC_SUPABASE_ANON_KEY`
 - Protect private API routes
 - Validate uploaded files
+- Keep stronger distributed rate limiting, such as Redis-backed limits, on the deployment roadmap
+
+---
+
+# Production RAG Update
+
+This version adds the first production-grade RAG features:
+
+- Citations with `document_id`, `filename`, `page_number`, `chunk_index`, `chunk_preview`, and retrieval `score` when available.
+- Streaming responses from `POST /chat/stream` using Server-Sent Events.
+- Non-streaming fallback via `POST /chat`.
+- Document processing status: `pending`, `processing`, `completed`, `failed`.
+- `error_message` storage for failed document processing.
+- Strict grounded mode enabled by default with this no-context response: `I could not find this in your uploaded documents.`
+- Basic PDF validation: PDF extension/content type, non-empty file, max 10 MB.
+- Basic in-memory rate limiting for chat, upload URL creation, and document processing.
+
+Run the idempotent Supabase migration in:
+
+```text
+backend/supabase_user_persistence.sql
+```
+
+Minimal migration commands for an existing database:
+
+```sql
+alter table public.documents
+  add column if not exists status text default 'completed',
+  add column if not exists error_message text;
+
+alter table public.documents
+  drop constraint if exists documents_status_check;
+
+alter table public.documents
+  add constraint documents_status_check
+  check (status in ('pending', 'processing', 'completed', 'failed'));
+
+alter table public.chunks
+  add column if not exists page_number integer,
+  add column if not exists chunk_index integer;
+
+create index if not exists chunks_document_page_chunk_idx
+  on public.chunks(document_id, page_number, chunk_index);
+
+create or replace function public.match_chunks(
+  query_embedding vector(1536),
+  match_count int,
+  filter_document_id uuid
+)
+returns table (
+  id uuid,
+  document_id uuid,
+  content text,
+  file_id text,
+  page_number integer,
+  chunk_index integer,
+  metadata jsonb,
+  similarity double precision
+)
+language sql stable
+as $$
+  select
+    chunks.id,
+    chunks.document_id,
+    chunks.content,
+    chunks.file_id,
+    chunks.page_number,
+    chunks.chunk_index,
+    chunks.metadata,
+    1 - (chunks.embedding <=> query_embedding) as similarity
+  from public.chunks
+  where chunks.document_id = filter_document_id
+  order by chunks.embedding <=> query_embedding
+  limit match_count;
+$$;
+```
+
+Updated chat request:
+
+```json
+{
+  "message": "What does the policy say about refunds?",
+  "document_id": "document_uuid",
+  "conversation_id": "conversation_uuid",
+  "match_count": 5,
+  "hybrid_search_enabled": true,
+  "strict_grounded_mode": true
+}
+```
+
+Updated chat response:
+
+```json
+{
+  "conversation_id": "conversation_uuid",
+  "answer": "The policy says ...",
+  "sources": [
+    {
+      "document_id": "document_uuid",
+      "filename": "policy.pdf",
+      "page_number": 3,
+      "chunk_index": 7,
+      "chunk_preview": "Relevant text from the retrieved chunk...",
+      "score": 0.0328
+    }
+  ]
+}
+```
+
+Streaming events:
+
+```text
+data: {"type":"conversation","conversation_id":"conversation_uuid"}
+data: {"type":"sources","sources":[...]}
+data: {"type":"token","content":"partial text"}
+data: {"type":"done"}
+```
+
+Document status response:
+
+```json
+{
+  "documents": [
+    {
+      "document_id": "document_uuid",
+      "name": "policy.pdf",
+      "storage_path": "uploads/user_uuid/file_uuid-policy.pdf",
+      "file_size": 245760,
+      "total_chunks": 12,
+      "status": "completed",
+      "error_message": null
+    }
+  ]
+}
+```
+
+Manual setup notes:
+
+- Re-run processing for old documents if you want page-number citations on existing chunks.
+- Keep `SUPABASE_SERVICE_ROLE_KEY` only in `backend/.env`.
+- Keep `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_ANON_KEY` in `frontend/.env.local`.
+- Create a private Supabase Storage bucket named `documents` and allow users to upload only into `uploads/{user_id}/...`.
 
 ---
 
 # 🌟 Future Improvements
 
-- Streaming AI responses
 - OCR support for scanned PDFs
 - Drag & Drop uploads
 - Redis caching

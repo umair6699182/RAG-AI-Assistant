@@ -45,7 +45,30 @@ def normalize_chunk(
         or metadata.get("storage_path")
         or metadata.get("file_name")
     )
-    normalized["page"] = chunk.get("page") or metadata.get("page")
+    normalized["page_number"] = next(
+        (
+            value
+            for value in [
+                chunk.get("page_number"),
+                chunk.get("page"),
+                metadata.get("page_number"),
+                metadata.get("page"),
+            ]
+            if value is not None
+        ),
+        None,
+    )
+    normalized["chunk_index"] = next(
+        (
+            value
+            for value in [
+                chunk.get("chunk_index"),
+                metadata.get("chunk_index"),
+            ]
+            if value is not None
+        ),
+        None,
+    )
     normalized["metadata"] = metadata
 
     if score is not None:

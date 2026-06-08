@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 
 import MessageBubble from "./MessageBubble";
 import {
+  askQuestion,
   deleteConversation,
   getDocumentMessages,
   streamChat,
@@ -11,13 +12,19 @@ import {
 import { toast } from "sonner";
 
 interface Source {
-  content: string;
   document_id?: string;
+  filename?: string;
+  page_number?: number;
+  chunk_index?: number;
+  chunk_preview?: string;
+  score?: number;
   file_id?: string;
   metadata?: {
     chunk_index?: number;
     file_name?: string;
-    pages?: number;
+    page_number?: number;
+    retrieval_type?: string;
+    score?: number;
   };
 }
 
@@ -151,6 +158,7 @@ export default function ChatBox({
         document_id: documentId,
         conversation_id: conversationId,
         match_count: 5,
+        strict_grounded_mode: true,
       });
 
       if (!response.ok || !response.body) {
@@ -237,19 +245,39 @@ export default function ChatBox({
     } catch (error) {
       console.error(error);
 
-      setMessages((prev) => {
-        const updated = [...prev];
+      try {
+        const fallback = await askQuestion(q, documentId, conversationId);
 
-        const lastIndex = updated.length - 1;
+        setConversationId(fallback.conversation_id);
+        setMessages((prev) => {
+          const updated = [...prev];
+          const lastIndex = updated.length - 1;
 
-        updated[lastIndex] = {
-          role: "assistant",
-          content:
-            "Something went wrong while generating the response.",
-        };
+          updated[lastIndex] = {
+            role: "assistant",
+            content: fallback.answer,
+            sources: fallback.sources || [],
+          };
 
-        return updated;
-      });
+          return updated;
+        });
+      } catch (fallbackError) {
+        console.error(fallbackError);
+
+        setMessages((prev) => {
+          const updated = [...prev];
+
+          const lastIndex = updated.length - 1;
+
+          updated[lastIndex] = {
+            role: "assistant",
+            content:
+              "Something went wrong while generating the response.",
+          };
+
+          return updated;
+        });
+      }
     } finally {
       setLoading(false);
     }

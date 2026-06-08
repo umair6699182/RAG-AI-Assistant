@@ -7,6 +7,8 @@ create table if not exists public.documents (
   file_name text,
   file_size bigint default 0,
   total_chunks integer default 0,
+  status text default 'completed' check (status in ('pending', 'processing', 'completed', 'failed')),
+  error_message text,
   created_at timestamptz default now()
 );
 
@@ -16,7 +18,16 @@ alter table public.documents
   add column if not exists file_name text,
   add column if not exists file_size bigint default 0,
   add column if not exists total_chunks integer default 0,
+  add column if not exists status text default 'completed',
+  add column if not exists error_message text,
   add column if not exists created_at timestamptz default now();
+
+alter table public.documents
+  drop constraint if exists documents_status_check;
+
+alter table public.documents
+  add constraint documents_status_check
+  check (status in ('pending', 'processing', 'completed', 'failed'));
 
 create table if not exists public.chunks (
   id uuid primary key default gen_random_uuid(),
@@ -25,6 +36,8 @@ create table if not exists public.chunks (
   content text,
   embedding vector(1536),
   file_id text,
+  page_number integer,
+  chunk_index integer,
   metadata jsonb default '{}'::jsonb,
   created_at timestamptz default now()
 );
@@ -34,6 +47,8 @@ alter table public.chunks
   add column if not exists document_id uuid references public.documents(id) on delete cascade,
   add column if not exists content text,
   add column if not exists file_id text,
+  add column if not exists page_number integer,
+  add column if not exists chunk_index integer,
   add column if not exists metadata jsonb default '{}'::jsonb,
   add column if not exists created_at timestamptz default now();
 
@@ -82,3 +97,38 @@ create index if not exists messages_user_conversation_created_idx
 
 create index if not exists chunks_document_id_idx
   on public.chunks(document_id);
+
+create index if not exists chunks_document_page_chunk_idx
+  on public.chunks(document_id, page_number, chunk_index);
+
+create or replace function public.match_chunks(
+  query_embedding vector(1536),
+  match_count int,
+  filter_document_id uuid
+)
+returns table (
+  id uuid,
+  document_id uuid,
+  content text,
+  file_id text,
+  page_number integer,
+  chunk_index integer,
+  metadata jsonb,
+  similarity double precision
+)
+language sql stable
+as $$
+  select
+    chunks.id,
+    chunks.document_id,
+    chunks.content,
+    chunks.file_id,
+    chunks.page_number,
+    chunks.chunk_index,
+    chunks.metadata,
+    1 - (chunks.embedding <=> query_embedding) as similarity
+  from public.chunks
+  where chunks.document_id = filter_document_id
+  order by chunks.embedding <=> query_embedding
+  limit match_count;
+$$;

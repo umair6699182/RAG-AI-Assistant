@@ -1,11 +1,17 @@
 interface Source {
-  content: string;
   document_id?: string;
+  filename?: string;
+  page_number?: number;
+  chunk_index?: number;
+  chunk_preview?: string;
+  score?: number;
   file_id?: string;
   metadata?: {
     chunk_index?: number;
     file_name?: string;
-    pages?: number;
+    page_number?: number;
+    retrieval_type?: string;
+    score?: number;
   };
 }
 
@@ -84,19 +90,21 @@ export default function MessageBubble({
               {sources.map((src, i) => (
                 <div
                   key={i}
-                  className="px-2.5 py-1.5 rounded-lg border border-[#7c6af7]/18 bg-[#7c6af7]/8 hover:bg-[#7c6af7]/14 transition-colors duration-150"
+                  className="max-w-[260px] px-2.5 py-1.5 rounded-lg border border-[#7c6af7]/18 bg-[#7c6af7]/8 hover:bg-[#7c6af7]/14 transition-colors duration-150"
                 >
-                  {/* File Name */}
                   <p className="text-[10px] font-medium text-[#a78bfa] truncate max-w-[220px]">
-                    {src.metadata?.file_name ||
+                    {src.filename ||
+                      src.metadata?.file_name ||
                       "Document Source"}
                   </p>
 
-                  {/* Chunk */}
-                  {typeof src.metadata
-                    ?.chunk_index === "number" && (
-                    <p className="text-[9px] text-[#7d7d90] mt-0.5">
-                      Chunk #{src.metadata.chunk_index + 1}
+                  <p className="text-[9px] text-[#7d7d90] mt-0.5">
+                    {getSourceLabel(src)}
+                  </p>
+
+                  {src.chunk_preview && (
+                    <p className="mt-1 line-clamp-2 text-[9.5px] leading-4 text-[#d7d7e8]/75">
+                      {src.chunk_preview}
                     </p>
                   )}
                 </div>
@@ -106,4 +114,26 @@ export default function MessageBubble({
       </div>
     </div>
   );
+}
+
+function getSourceLabel(src: Source) {
+  const pageNumber = src.page_number ?? src.metadata?.page_number;
+  const chunkIndex = src.chunk_index ?? src.metadata?.chunk_index;
+  const score = src.score ?? src.metadata?.score;
+
+  const parts = [];
+
+  if (typeof pageNumber === "number") {
+    parts.push(`Page ${pageNumber}`);
+  }
+
+  if (typeof chunkIndex === "number") {
+    parts.push(`Chunk ${chunkIndex + 1}`);
+  }
+
+  if (typeof score === "number") {
+    parts.push(`Score ${score.toFixed(3)}`);
+  }
+
+  return parts.join(" · ") || "Retrieved source";
 }

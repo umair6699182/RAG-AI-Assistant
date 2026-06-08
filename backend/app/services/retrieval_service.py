@@ -42,7 +42,7 @@ def search_keyword_chunks(
 ) -> List[dict]:
     response = (
         supabase.table("chunks")
-        .select("id, document_id, content, file_id, metadata")
+        .select("id, document_id, content, file_id, page_number, chunk_index, metadata")
         .eq("document_id", document_id)
         .execute()
     )

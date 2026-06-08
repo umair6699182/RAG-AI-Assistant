@@ -15,6 +15,8 @@ interface Doc {
   file_size?: number;
   total_chunks?: number;
   storage_path: string;
+  status?: "pending" | "processing" | "completed" | "failed";
+  error_message?: string | null;
 }
 
 interface DocumentsPanelProps {
@@ -116,13 +118,10 @@ export function DocumentsPanel({
                 </span>
 
                 <span
-                  className={`w-fit rounded-full border px-2 py-1 text-[10px] font-medium ${
-                    isActive
-                      ? "border-[#7c6af7]/30 bg-[#7c6af7]/15 text-[#c7bfff]"
-                      : "border-emerald-400/15 bg-emerald-500/10 text-emerald-200"
-                  }`}
+                  className={`w-fit rounded-full border px-2 py-1 text-[10px] font-medium ${getStatusBadgeClass(doc.status, isActive)}`}
+                  title={doc.error_message || undefined}
                 >
-                  {isActive ? "Selected" : "Indexed"}
+                  {getStatusLabel(doc.status, isActive)}
                 </span>
               </button>
             );
@@ -423,4 +422,38 @@ function getProvider(user: User | null) {
   }
 
   return provider.charAt(0).toUpperCase() + provider.slice(1);
+}
+
+function getStatusLabel(status?: Doc["status"], selected = false) {
+  if (selected) {
+    return "Selected";
+  }
+
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "processing":
+      return "Processing";
+    case "failed":
+      return "Failed";
+    default:
+      return "Completed";
+  }
+}
+
+function getStatusBadgeClass(status?: Doc["status"], selected = false) {
+  if (selected) {
+    return "border-[#7c6af7]/30 bg-[#7c6af7]/15 text-[#c7bfff]";
+  }
+
+  switch (status) {
+    case "pending":
+      return "border-amber-400/15 bg-amber-500/10 text-amber-200";
+    case "processing":
+      return "border-sky-400/15 bg-sky-500/10 text-sky-200";
+    case "failed":
+      return "border-red-400/15 bg-red-500/10 text-red-200";
+    default:
+      return "border-emerald-400/15 bg-emerald-500/10 text-emerald-200";
+  }
 }

@@ -11,17 +11,25 @@ export interface ApiDocument {
   storage_path: string;
   file_size?: number;
   total_chunks?: number;
+  status?: "pending" | "processing" | "completed" | "failed";
+  error_message?: string | null;
   created_at?: string;
 }
 
 export interface ChatSource {
-  content: string;
   document_id?: string;
+  filename?: string;
+  page_number?: number;
+  chunk_index?: number;
+  chunk_preview?: string;
+  score?: number;
   file_id?: string;
   metadata?: {
     chunk_index?: number;
     file_name?: string;
-    pages?: number;
+    page_number?: number;
+    retrieval_type?: string;
+    score?: number;
   };
 }
 
@@ -38,6 +46,7 @@ interface ChatStreamBody {
   document_id: string;
   conversation_id?: string;
   match_count?: number;
+  strict_grounded_mode?: boolean;
 }
 
 async function getAccessToken() {
@@ -172,6 +181,7 @@ export async function askQuestion(
       message,
       document_id: documentId,
       conversation_id: conversationId,
+      strict_grounded_mode: true,
     }),
   });
 

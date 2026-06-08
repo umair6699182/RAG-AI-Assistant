@@ -18,6 +18,8 @@ interface Doc {
   file_size?: number;
   total_chunks?: number;
   storage_path: string;
+  status?: "pending" | "processing" | "completed" | "failed";
+  error_message?: string | null;
 }
 
 interface SidebarProps {
@@ -89,6 +91,10 @@ export default function Sidebar({
 
     if (file.type !== "application/pdf") {
       return toast.error("Please upload a valid PDF file.");
+    }
+
+    if (file.size === 0) {
+      return toast.error("PDF file is empty.");
     }
 
     // Max 10MB
@@ -321,6 +327,10 @@ export default function Sidebar({
                     ? ` · ${doc.total_chunks} chunks`
                     : ""}
                 </p>
+
+                <p className={`mt-1 text-[10px] ${getStatusTextClass(doc.status)}`}>
+                  {getStatusLabel(doc.status)}
+                </p>
               </div>
 
               {/* Active Indicator */}
@@ -382,6 +392,8 @@ function toDoc(doc: ApiDocument): Doc {
     file_size: fileSize,
     total_chunks: doc.total_chunks || 0,
     storage_path: doc.storage_path,
+    status: doc.status || "completed",
+    error_message: doc.error_message,
   };
 }
 
@@ -391,4 +403,30 @@ function formatFileSize(bytes: number) {
   }
 
   return `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+}
+
+function getStatusLabel(status?: Doc["status"]) {
+  switch (status) {
+    case "pending":
+      return "Pending";
+    case "processing":
+      return "Processing";
+    case "failed":
+      return "Failed";
+    default:
+      return "Completed";
+  }
+}
+
+function getStatusTextClass(status?: Doc["status"]) {
+  switch (status) {
+    case "pending":
+      return "text-amber-200";
+    case "processing":
+      return "text-sky-200";
+    case "failed":
+      return "text-red-200";
+    default:
+      return "text-emerald-200";
+  }
 }

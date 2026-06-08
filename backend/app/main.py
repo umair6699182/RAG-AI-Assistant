@@ -4,6 +4,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.routes.process_document import router as process_document_router
 from app.routes.chat import router as chat_router
 from app.routes.documents import router as documents_router
+from app.routes.upload import router as upload_router
 
 app = FastAPI(title="RAG Backend")
 
@@ -24,6 +25,7 @@ app.add_middleware(
 app.include_router(process_document_router)
 app.include_router(chat_router)
 app.include_router(documents_router)
+app.include_router(upload_router)
 
 
 @app.get("/")

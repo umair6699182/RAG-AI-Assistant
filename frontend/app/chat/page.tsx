@@ -23,6 +23,8 @@ interface Doc {
   file_size?: number;
   total_chunks?: number;
   storage_path: string;
+  status?: "pending" | "processing" | "completed" | "failed";
+  error_message?: string | null;
 }
 
 export default function Page() {

@@ -18,7 +18,7 @@ BUCKET_NAME = "documents"
 def get_documents(current_user: CurrentUser = Depends(get_current_user)):
     response = (
         supabase.table("documents")
-        .select("id, storage_path, file_name")
+        .select("id, storage_path, file_name, file_size, total_chunks, status, error_message, created_at")
         .execute()
     )
 
@@ -37,8 +37,11 @@ def get_documents(current_user: CurrentUser = Depends(get_current_user)):
             "name": file_name,
             "file_name": file_name,
             "storage_path": row.get("storage_path"),
-            "file_size": 0,
-            "total_chunks": total_chunks,
+            "file_size": row.get("file_size") or 0,
+            "total_chunks": row.get("total_chunks") or total_chunks,
+            "status": row.get("status") or "completed",
+            "error_message": row.get("error_message"),
+            "created_at": row.get("created_at"),
         })
 
     return {
