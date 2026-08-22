@@ -2,7 +2,7 @@
 
 An advanced full-stack **Retrieval-Augmented Generation (RAG)** AI platform built using **Next.js**, **FastAPI**, **OpenAI**, and **Supabase**.
 
-This application enables users to upload documents, generate embeddings, perform semantic search, and interact with AI-powered contextual conversations based on their uploaded PDFs.
+This application enables users to upload documents, generate embeddings, perform semantic search, and interact with AI-powered contextual conversations based on their uploaded PDFs and Files.
 
 <img width="1919" height="880" alt="Screenshot 2026-05-11 010728" src="https://github.com/user-attachments/assets/e2b548e3-4365-4b3e-bf5e-aeb7fd24c171" />
 <img width="1919" height="879" alt="Screenshot 2026-05-11 010719" src="https://github.com/user-attachments/assets/a4a06dfb-ddcd-4ff9-a6d9-0f22aaa3f010" />
