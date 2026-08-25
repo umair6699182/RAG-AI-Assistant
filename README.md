@@ -672,7 +672,6 @@ Recommended:
 ## Backend
 Recommended:
 - Render
-- Railway
 - AWS
 - DigitalOcean
 
